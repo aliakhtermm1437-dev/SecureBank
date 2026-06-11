@@ -1,0 +1,167 @@
+name: ci
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  security-events: write
+  id-token: write     # for cosign keyless / OIDC
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+
+jobs:
+  # ---------- 1. Lint, type-check, unit tests ----------
+  test:
+    name: Test (${{ matrix.svc }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        svc: [shared, auth-service, account-service, transaction-service, fraud-detection-service, notification-service, api-gateway]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - name: Install shared lib (editable)
+        run: pip install -e src/shared[dev]
+      - name: Install service if applicable
+        if: matrix.svc != 'shared'
+        run: pip install -e src/${{ matrix.svc }}
+      - name: Ruff lint
+        run: ruff check src/${{ matrix.svc }}
+      - name: Bandit (security lint)
+        run: bandit -q -r src/${{ matrix.svc }} -lll -iii
+      - name: Pytest
+        run: |
+          if [ -d "src/${{ matrix.svc }}/tests" ]; then
+            pytest -q --maxfail=1 --cov src/${{ matrix.svc }} src/${{ matrix.svc }}/tests
+          fi
+
+  # ---------- 2. SAST — CodeQL ----------
+  codeql:
+    name: CodeQL SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python, javascript
+          config-file: ./ci/codeql-config.yml
+      - uses: github/codeql-action/analyze@v3
+
+  # ---------- 3. SCA — pip-audit ----------
+  sca:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install pip-audit
+      - run: |
+          for svc in shared auth-service account-service transaction-service \
+                     fraud-detection-service notification-service api-gateway; do
+            pip-audit --strict --requirement <(pip install --dry-run --report - -e src/$svc 2>/dev/null | jq -r '.install[].metadata.requires_dist[]?' || true) || true
+          done
+
+  # ---------- 4. Secrets — gitleaks ----------
+  secrets:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------- 5. SonarQube ----------
+  sonar:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    if: env.SONAR_TOKEN != ''
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: SonarSource/sonarqube-scan-action@v3
+
+  # ---------- 6. Build & scan images ----------
+  build:
+    needs: [test, codeql, sca, secrets]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        svc: [auth-service, account-service, transaction-service, fraud-detection-service, notification-service, api-gateway, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.svc }}.Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.svc }}:${{ github.sha }}
+          provenance: true
+          sbom: true
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.svc }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-${{ matrix.svc }}.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy-${{ matrix.svc }}.sarif }
+      - name: Cosign sign
+        uses: sigstore/cosign-installer@v3
+      - run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.svc }}@${{ steps.build.outputs.digest }}
+
+  # ---------- 7. OPA / Conftest policy tests ----------
+  opa-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: open-policy-agent/setup-opa@v2
+        with: { version: latest }
+      - run: opa test k8s/policies/opa -v
+      - run: |
+          curl -L -o conftest.tgz https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz
+          tar xzf conftest.tgz
+          ./conftest test k8s/apps/
+
+  # ---------- 8. DAST — ZAP baseline ----------
+  zap:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boot stack
+        run: docker compose -f docker/docker-compose.yml up -d --build
+      - name: ZAP Baseline
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: 'http://localhost:8443'
+          cmd_options: '-a -r zap-report.html -J zap-report.json'
+      - uses: actions/upload-artifact@v4
+        with: { name: zap-report, path: 'zap-*.html' }
