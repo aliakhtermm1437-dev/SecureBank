@@ -1,0 +1,21 @@
+# Intentionally UNSAFE image — used only for the Red/Blue drill.
+# Never push this tag to a production registry; the K8s admission policy
+# `block-vuln-tag` in k8s/policies/kyverno/disallow-latest-tag.yaml refuses
+# any image whose tag contains 'vuln'.
+
+# syntax=docker/dockerfile:1.7
+FROM debian:bookworm-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends gcc make file binutils && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY vuln.c attack.sh Makefile ./
+RUN make vuln && chmod +x attack.sh
+
+FROM debian:bookworm-slim
+RUN useradd -u 10001 -m demo && \
+    apt-get update && apt-get install -y --no-install-recommends bash file binutils && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /home/demo
+COPY --from=build /src/vuln /src/attack.sh ./
+USER 10001
+ENTRYPOINT ["/bin/bash"]
+CMD ["attack.sh"]

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SecureBank — Trusted Banking</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.securebank.local; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%2300d4aa' d='M16 2L4 7v10c0 7 5 12 12 13 7-1 12-6 12-13V7L16 2zm0 3l9 4v8c0 5-4 9-9 10-5-1-9-5-9-10V9l9-4z'/%3E%3Cpath fill='%2300d4aa' d='M12 14v6h2v-6h-2zm6 0v6h2v-6h-2zm-3-2v8h2v-8h-2z'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- ============== Top App Bar ============== -->
+<header class="appbar" id="appbar" hidden>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+      <path fill="currentColor" d="M16 2L4 7v10c0 7 5 12 12 13 7-1 12-6 12-13V7L16 2zm0 3l9 4v8c0 5-4 9-9 10-5-1-9-5-9-10V9l9-4z"/>
+      <path fill="currentColor" d="M12 14v6h2v-6h-2zm6 0v6h2v-6h-2zm-3-2v8h2v-8h-2z"/>
+    </svg>
+    <span>SecureBank</span>
+    <span class="env-badge" id="envBadge">DEV</span>
+  </div>
+  <nav class="nav">
+    <a href="#/dashboard" data-route="dashboard">Dashboard</a>
+    <a href="#/accounts"  data-route="accounts">Accounts</a>
+    <a href="#/transfer"  data-route="transfer">Transfer</a>
+    <a href="#/history"   data-route="history">History</a>
+    <a href="#/notifications" data-route="notifications">
+      Notifications <span class="badge" id="notifBadge" hidden>0</span>
+    </a>
+    <a href="#/security"  data-route="security" id="securityNav" hidden>Security</a>
+  </nav>
+  <div class="user">
+    <span id="userEmail" class="muted"></span>
+    <span class="chip" id="mfaChip" hidden>MFA ✓</span>
+    <button class="btn ghost" id="btnLogout" title="Sign out">Sign out</button>
+  </div>
+</header>
+
+<!-- ============== Toast ============== -->
+<div class="toast-host" id="toastHost" aria-live="polite"></div>
+
+<!-- ============== Login Screen ============== -->
+<main id="screenLogin" class="screen login">
+  <section class="card login-card">
+    <div class="brand brand-large">
+      <svg class="logo big" viewBox="0 0 32 32" aria-hidden="true">
+        <path fill="currentColor" d="M16 2L4 7v10c0 7 5 12 12 13 7-1 12-6 12-13V7L16 2zm0 3l9 4v8c0 5-4 9-9 10-5-1-9-5-9-10V9l9-4z"/>
+        <path fill="currentColor" d="M12 14v6h2v-6h-2zm6 0v6h2v-6h-2zm-3-2v8h2v-8h-2z"/>
+      </svg>
+      <h1>SecureBank</h1>
+    </div>
+    <p class="muted">Zero-Trust Banking, secured by OAuth2/OIDC + MFA</p>
+
+    <!-- Step 1: credentials -->
+    <form id="loginForm" autocomplete="off" class="form">
+      <label>
+        <span>Email</span>
+        <input type="email" id="loginEmail" required autocomplete="username"
+               placeholder="demo@securebank.local" value="demo@securebank.local">
+      </label>
+      <label>
+        <span>Password</span>
+        <div class="pw">
+          <input type="password" id="loginPassword" required autocomplete="current-password"
+                 minlength="12" placeholder="At least 12 characters">
+          <button type="button" class="ghost icon" id="togglePw" aria-label="Show password">👁</button>
+        </div>
+        <small class="muted">Argon2id hashed · checked against breached-password registry</small>
+      </label>
+      <button type="submit" class="btn primary" id="btnLogin">Sign in</button>
+      <p class="error" id="loginError" role="alert" hidden></p>
+    </form>
+
+    <!-- Step 2: MFA -->
+    <form id="mfaForm" autocomplete="off" class="form" hidden>
+      <p>Enter the 6-digit code from your authenticator app.</p>
+      <input type="text" id="mfaCode" inputmode="numeric" pattern="\d{6}"
+             maxlength="6" required class="otp" placeholder="••••••">
+      <button type="submit" class="btn primary">Verify</button>
+      <button type="button" class="btn ghost" id="btnBackLogin">Back</button>
+      <p class="error" id="mfaError" role="alert" hidden></p>
+    </form>
+
+    <details class="advanced">
+      <summary>Need an account?</summary>
+      <form id="registerForm" class="form">
+        <label><span>Email</span>
+          <input type="email" id="regEmail" required></label>
+        <label><span>Phone</span>
+          <input type="tel" id="regPhone" placeholder="+923001234567" pattern="\+92\d{10}"></label>
+        <label><span>Password (≥12 chars)</span>
+          <input type="password" id="regPassword" minlength="12" required></label>
+        <button type="submit" class="btn">Create account</button>
+      </form>
+    </details>
+
+    <footer class="login-foot muted">
+      <span>TLS 1.3 · mTLS · ASVS L2 · NIST CSF 2.0</span>
+    </footer>
+  </section>
+
+  <aside class="login-aside">
+    <h2>Defense-in-depth, by design</h2>
+    <ul class="feature-list">
+      <li><b>Zero Trust</b> — mTLS between every service, JWT + OPA per request</li>
+      <li><b>MFA-enforced</b> for transfers ≥ ₨10,000</li>
+      <li><b>AI/ML fraud detection</b> on every transaction</li>
+      <li><b>Falco</b> runtime sensors + <b>IBM QRadar</b> SIEM</li>
+      <li><b>Kyverno + OPA Gatekeeper</b> Policy-as-Code</li>
+      <li><b>Hardened</b> distroless containers, signed with Cosign</li>
+    </ul>
+    <div class="frame-stats">
+      <div><strong>14</strong><span>MITRE techniques covered</span></div>
+      <div><strong>0</strong><span>HIGH/CRITICAL vulns</span></div>
+      <div><strong>96%</strong><span>CIS K8s pass rate</span></div>
+    </div>
+  </aside>
+</main>
+
+<!-- ============== App (post-login) ============== -->
+<main id="app" class="screen app" hidden>
+
+  <!-- Dashboard -->
+  <section data-screen="dashboard" class="page" hidden>
+    <h1>Welcome back<span id="welcomeName"></span></h1>
+    <div class="grid stats">
+      <div class="card kpi">
+        <span class="kpi-label">Total balance</span>
+        <span class="kpi-value" id="kpiBalance">—</span>
+      </div>
+      <div class="card kpi">
+        <span class="kpi-label">Accounts</span>
+        <span class="kpi-value" id="kpiAccounts">—</span>
+      </div>
+      <div class="card kpi">
+        <span class="kpi-label">Transfers (30d)</span>
+        <span class="kpi-value" id="kpiTransfers">—</span>
+      </div>
+      <div class="card kpi">
+        <span class="kpi-label">Risk</span>
+        <span class="kpi-value risk-low" id="kpiRisk">Low</span>
+      </div>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>Recent activity</h3>
+        <ul class="activity" id="recentActivity"><li class="muted">Loading…</li></ul>
+      </div>
+      <div class="card">
+        <h3>Quick actions</h3>
+        <div class="action-grid">
+          <button class="btn primary" onclick="location.hash='#/transfer'">New transfer</button>
+          <button class="btn"        onclick="location.hash='#/accounts'">Open account</button>
+          <button class="btn"        onclick="location.hash='#/history'">Transaction history</button>
+          <button class="btn ghost"  id="btnEnrollMFA">Enable MFA</button>
+        </div>
+        <div class="trust">
+          <h4>Your security posture</h4>
+          <ul>
+            <li id="trustMfa">MFA — <span class="state">unknown</span></li>
+            <li id="trustPwd">Password rotated — <span class="state">unknown</span></li>
+            <li id="trustSession">Session age — <span class="state">—</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Accounts -->
+  <section data-screen="accounts" class="page" hidden>
+    <header class="page-head">
+      <h1>Accounts</h1>
+      <div class="action-grid" style="grid-template-columns: auto auto auto;">
+        <select id="newAccountCcy" class="btn ghost" aria-label="Currency">
+          <option value="PKR">PKR</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="GBP">GBP</option>
+          <option value="AED">AED</option>
+        </select>
+        <button class="btn primary" id="btnNewAccount">Open new account</button>
+        <button class="btn ghost"   id="btnRefreshAccounts" title="Refresh">⟳</button>
+      </div>
+    </header>
+    <div class="card">
+      <table class="table">
+        <thead><tr><th>IBAN</th><th>Currency</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+        <tbody id="accountsBody"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Transfer -->
+  <section data-screen="transfer" class="page" hidden>
+    <h1>Send money</h1>
+    <div class="grid two">
+      <form id="transferForm" class="card form">
+        <label><span>From account</span>
+          <select id="transferSrc" required></select>
+        </label>
+        <label><span>To (saved recipient or paste an account ID)</span>
+          <select id="transferDst" required></select>
+        </label>
+        <label><span>Amount (₨)</span>
+          <input type="number" id="transferAmt" required min="0.01" step="0.01" placeholder="500">
+        </label>
+        <div class="action-grid">
+          <button type="button" class="btn ghost" data-quick-amt="500">₨ 500</button>
+          <button type="button" class="btn ghost" data-quick-amt="2500">₨ 2,500</button>
+          <button type="button" class="btn ghost" data-quick-amt="9500">₨ 9,500</button>
+          <button type="button" class="btn ghost" data-quick-amt="25000">₨ 25,000 (step-up)</button>
+        </div>
+        <label><span>Memo (optional, sanitised)</span>
+          <input type="text" id="transferMemo" maxlength="140" placeholder="Birthday gift">
+        </label>
+        <button class="btn primary" type="submit">Send</button>
+        <p class="muted">
+          Transfers over ₨10,000 require step-up MFA. Each request carries an
+          idempotency key. Risk-scored and audit-logged.
+        </p>
+      </form>
+      <div class="card">
+        <h3>How this transfer is secured</h3>
+        <ol class="steps">
+          <li><b>JWT verified</b> at the API gateway (RS256, JWKS pinned)</li>
+          <li><b>OPA policy</b> checks ownership and amount thresholds</li>
+          <li><b>Idempotency</b> key prevents duplicate debits</li>
+          <li><b>Atomic SQL</b> with row-lock; balance never goes negative</li>
+          <li><b>Signed Kafka event</b> (HMAC-SHA256) → fraud + notifications</li>
+          <li><b>ML fraud model</b> scores velocity, amount, recipient novelty</li>
+        </ol>
+      </div>
+    </div>
+    <div class="card" id="transferResult" hidden>
+      <h3>Receipt</h3>
+      <pre id="transferReceipt" class="code"></pre>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section data-screen="history" class="page" hidden>
+    <h1>Transaction history</h1>
+    <div class="card">
+      <table class="table">
+        <thead><tr><th>When</th><th>From → To</th><th>Amount</th><th>Risk</th><th>Status</th></tr></thead>
+        <tbody id="historyBody"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Notifications -->
+  <section data-screen="notifications" class="page" hidden>
+    <h1>Notifications</h1>
+    <div class="card">
+      <ul class="notif" id="notifList"><li class="muted">No notifications.</li></ul>
+    </div>
+  </section>
+
+  <!-- Security Console (Admin) -->
+  <section data-screen="security" class="page" hidden>
+    <header class="page-head">
+      <h1>Security Console</h1>
+      <span class="chip warn">Admin · MFA required</span>
+    </header>
+
+    <div class="grid stats">
+      <div class="card kpi">
+        <span class="kpi-label">Login failures (15m)</span>
+        <span class="kpi-value" id="secKpiFail">—</span>
+      </div>
+      <div class="card kpi">
+        <span class="kpi-label">Rate-limit hits (15m)</span>
+        <span class="kpi-value" id="secKpiRL">—</span>
+      </div>
+      <div class="card kpi">
+        <span class="kpi-label">Fraud alerts (1h)</span>
+        <span class="kpi-value risk-high" id="secKpiFraud">—</span>
+      </div>
+      <div class="card kpi">
+        <span class="kpi-label">Falco events (1h)</span>
+        <span class="kpi-value risk-med" id="secKpiFalco">—</span>
+      </div>
+    </div>
+
+    <div class="grid two">
+      <div class="card">
+        <h3>Live audit events</h3>
+        <ul class="audit" id="auditFeed"><li class="muted">Connecting…</li></ul>
+      </div>
+      <div class="card">
+        <h3>Active offenses (QRadar)</h3>
+        <ul class="offenses" id="offenseList">
+          <li class="muted">No offenses.</li>
+        </ul>
+        <h4>Auto-Response Playbooks (SOAR)</h4>
+        <div class="action-grid">
+          <button class="btn"        data-soar="cordon"  title="PB-004">Cordon node</button>
+          <button class="btn"        data-soar="rotate"  title="PB-002">Rotate JWT keys</button>
+          <button class="btn"        data-soar="freeze"  title="PB-003">Freeze account</button>
+          <button class="btn"        data-soar="block-ip" title="PB-001">Block source IP</button>
+          <button class="btn"        data-soar="quarantine" title="PB-007">Quarantine pod</button>
+          <button class="btn danger" data-soar="kill-sessions" title="PB-006">Kill session family</button>
+        </div>
+        <button class="btn ghost" id="btnClearOffenses" style="margin-top:.5rem">Clear offenses</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Red/Blue Drill — Run an attack simulation</h3>
+      <p class="muted">For demo purposes only. Replays a controlled attack scenario; defenses fire in real time.</p>
+      <div class="action-grid">
+        <button class="btn" data-attack="credstuff">Credential stuffing</button>
+        <button class="btn" data-attack="jwttamper">JWT alg=none</button>
+        <button class="btn" data-attack="sqli">SQL injection</button>
+        <button class="btn" data-attack="ssrf">SSRF — link-local</button>
+        <button class="btn" data-attack="ratelimit">Rate limit flood</button>
+        <button class="btn" data-attack="bigtransfer">Risky transfer (₨1,000,000)</button>
+        <button class="btn" data-attack="memcorrupt">Memory corruption (drill)</button>
+        <button class="btn" data-attack="container-escape">Container escape</button>
+      </div>
+      <button class="btn ghost" id="btnClearLog" style="margin-top:.5rem">Clear log</button>
+      <pre id="attackLog" class="code small"></pre>
+    </div>
+  </section>
+
+</main>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

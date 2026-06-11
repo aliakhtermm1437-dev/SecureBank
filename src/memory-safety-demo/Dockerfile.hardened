@@ -1,0 +1,17 @@
+# Hardened reference image — multi-stage, distroless-style, non-root,
+# read-only fs friendly.  All ASVS V14 build flags applied via Makefile.
+
+# syntax=docker/dockerfile:1.7
+FROM debian:bookworm-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc make file binutils libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY hardened.c attack.sh verify_hardening.sh Makefile ./
+RUN make hardened && chmod +x attack.sh verify_hardening.sh
+
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=build /src/hardened /src/attack.sh /src/verify_hardening.sh /
+WORKDIR /
+USER nonroot
+ENTRYPOINT ["/hardened"]

@@ -1,0 +1,22 @@
+{
+  "type": "record",
+  "name": "TransactionEvent",
+  "namespace": "securebank.events.v1",
+  "doc": "Authoritative shape of every event published on Kafka topic `transactions.events`. Registered with the Confluent Schema Registry; compatibility level FULL_TRANSITIVE.",
+  "fields": [
+    { "name": "event_id",        "type": { "type": "string", "logicalType": "uuid" }, "doc": "UUIDv7 — event identity for idempotency" },
+    { "name": "occurred_at",     "type": { "type": "long",   "logicalType": "timestamp-millis" } },
+    { "name": "type",            "type": { "type": "enum", "name": "TxType", "symbols": ["TRANSFER","DEPOSIT","WITHDRAW","REVERSAL"] } },
+    { "name": "src_account_id",  "type": "string" },
+    { "name": "dst_account_id",  "type": ["null","string"], "default": null },
+    { "name": "amount_minor",    "type": "long", "doc": "Smallest currency unit (paisa for PKR)" },
+    { "name": "currency",        "type": { "type": "enum", "name": "Ccy", "symbols": ["PKR","USD","EUR","GBP","AED"] } },
+    { "name": "memo",            "type": ["null","string"], "default": null, "doc": "Already sanitised on the producer side" },
+    { "name": "idempotency_key", "type": "string" },
+    { "name": "risk_score",      "type": ["null","float"], "default": null },
+    { "name": "actor_sub",       "type": "string", "doc": "JWT sub of the user/service that initiated the event" },
+    { "name": "trace_id",        "type": ["null","string"], "default": null, "doc": "OpenTelemetry trace ID" },
+    { "name": "schema_version",  "type": "int", "default": 1 },
+    { "name": "hmac",            "type": "string", "doc": "Base64 HMAC-SHA256 over the canonical JSON of preceding fields, key from Vault" }
+  ]
+}

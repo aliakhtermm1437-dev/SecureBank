@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "FraudResult",
+  "namespace": "securebank.events.v1",
+  "doc": "Output of the ML fraud detector, published on `transactions.fraud-results`.",
+  "fields": [
+    { "name": "event_id",      "type": { "type": "string", "logicalType": "uuid" } },
+    { "name": "tx_event_id",   "type": { "type": "string", "logicalType": "uuid" } },
+    { "name": "evaluated_at",  "type": { "type": "long",   "logicalType": "timestamp-millis" } },
+    { "name": "score",         "type": "float" },
+    { "name": "decision",      "type": { "type": "enum", "name": "Decision", "symbols": ["ALLOW","REVIEW","BLOCK"] } },
+    { "name": "model_version", "type": "string" },
+    { "name": "features",      "type": { "type": "map", "values": "double" } },
+    { "name": "reason_codes",  "type": { "type": "array", "items": "string" } },
+    { "name": "hmac",          "type": "string" }
+  ]
+}
