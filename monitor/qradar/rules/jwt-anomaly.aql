@@ -1,0 +1,27 @@
+-- SecureBank QRadar — JWT verification anomaly correlation
+-- Maps to: MITRE T1078 (Valid Accounts) / T1550.001 (Application Access Token)
+-- Trigger: ≥5 failed JWT verifications from same IP/UA in 60 sec, OR
+--          any alg=none / weak alg attempt, OR
+--          jti reuse (replay).
+
+SELECT
+    sourceip               AS src_ip,
+    "http.user_agent"      AS ua,
+    "jwt.kid"              AS kid,
+    "jwt.failure_reason"   AS reason,
+    COUNT(*)               AS attempts,
+    UNIQUECOUNT("jwt.sub") AS distinct_subs
+FROM events
+WHERE LOGSOURCETYPENAME(devicetype) = 'SecureBank-AuthService'
+  AND "event"      = 'jwt.verify.failed'
+  AND eventtime > NOW() - INTERVAL '1 MINUTE'
+GROUP BY src_ip, ua, kid, reason
+HAVING attempts >= 5
+    OR reason IN ('alg_none','alg_not_allowed','jti_replay','kid_unknown','signature_invalid')
+ORDER BY attempts DESC
+LAST 5 MINUTES;
+
+-- Auto-response (PB-002):
+-- 1. Add `src_ip` to gateway IP-deny set for 60 minutes
+-- 2. If `reason` ∈ (alg_none, alg_not_allowed) → open Sev-1 offense
+-- 3. Force JWKS rotation if ≥3 distinct kid values seen in window

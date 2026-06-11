@@ -1,0 +1,9 @@
+global:
+  imageTag: "dev"
+services:
+  authService: { replicas: 1 }
+  accountService: { replicas: 1 }
+  transactionService: { replicas: 1 }
+  fraudDetectionService: { replicas: 1 }
+  notificationService: { replicas: 1 }
+  apiGateway: { replicas: 1, ingress: { enabled: false } }

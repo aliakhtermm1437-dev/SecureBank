@@ -1,0 +1,73 @@
+# Adds Falco, Trivy scanner, Loki + Grafana, Prometheus.
+# `docker compose -f docker-compose.yml -f docker-compose.security.yml up -d`
+
+name: securebank
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    volumes:
+      - ../monitor/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    networks: [obs]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: securebank-dev-only
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../monitor/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitor/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    networks: [obs]
+
+  loki:
+    image: grafana/loki:3.1.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../monitor/loki/loki.yaml:/etc/loki/loki.yaml:ro
+    ports: ["3100:3100"]
+    networks: [obs]
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail.yaml"]
+    volumes:
+      - ../monitor/loki/promtail.yaml:/etc/promtail/promtail.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [obs]
+
+  falco:
+    image: falcosecurity/falco-no-driver:0.38.2
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /etc:/host/etc:ro
+      - ../monitor/falco/falco.yaml:/etc/falco/falco.yaml:ro
+      - ../monitor/falco/rules:/etc/falco/rules.d:ro
+    networks: [obs]
+
+  trivy:
+    image: aquasec/trivy:0.55.0
+    profiles: ["scan"]   # run on-demand: docker compose --profile scan run trivy ...
+    entrypoint: ["trivy"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - trivy-cache:/root/.cache/
+    networks: [obs]
+
+networks:
+  obs: {}
+
+volumes:
+  trivy-cache: {}

@@ -1,0 +1,27 @@
+# Minimal Vault HA via Helm values (apply with: helm install vault hashicorp/vault -f vault-ha.yaml)
+server:
+  ha:
+    enabled: true
+    replicas: 3
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+        listener "tcp" {
+          tls_disable     = "true"
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
+        storage "raft" {
+          path = "/vault/data"
+        }
+        service_registration "kubernetes" {}
+  dataStorage: { enabled: true, size: 20Gi }
+  auditStorage: { enabled: true, size: 10Gi }
+injector:
+  enabled: true
+ui:
+  enabled: true
+csi:
+  enabled: false

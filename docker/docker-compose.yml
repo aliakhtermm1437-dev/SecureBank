@@ -1,0 +1,246 @@
+name: securebank
+
+services:
+
+  # ================= INFRASTRUCTURE =================
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: securebank
+      POSTGRES_PASSWORD: securebank-dev-only-change-me
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "securebank-dev-only", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - data
+
+  # ================= KAFKA + ZOOKEEPER (FIXED INDENTATION) =================
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - data
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    networks:
+      - data
+
+  # ================= SECURITY CORE =================
+
+  vault:
+    image: hashicorp/vault:1.17
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root-dev-only
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: ["vault", "server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    ports:
+      - "8200:8200"
+    networks:
+      - sec
+
+  opa:
+    image: openpolicyagent/opa:0.66.0
+    restart: unless-stopped
+    command: ["run", "--server", "--addr", ":8181"]
+    ports:
+      - "8181:8181"
+    networks:
+      - sec
+
+  # ================= APPLICATION SERVICES =================
+
+  auth-service:
+    build:
+      context: ..
+      dockerfile: docker/auth-service.Dockerfile
+    environment:
+      SB_POSTGRES_DSN: postgresql+asyncpg://securebank:securebank-dev-only-change-me@postgres:5432/postgres
+      SB_REDIS_URL: redis://:securebank-dev-only@redis:6379/0
+      SB_KAFKA_BOOTSTRAP: kafka:9092
+      SB_VAULT_ADDR: http://vault:8200
+      SB_OPA_URL: http://opa:8181
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - app
+      - data
+
+  account-service:
+    build:
+      context: ..
+      dockerfile: docker/account-service.Dockerfile
+    environment:
+      SB_POSTGRES_DSN: postgresql+asyncpg://securebank:securebank-dev-only-change-me@postgres:5432/postgres
+      SB_REDIS_URL: redis://:securebank-dev-only@redis:6379/1
+      SB_KAFKA_BOOTSTRAP: kafka:9092
+      SB_VAULT_ADDR: http://vault:8200
+      SB_OPA_URL: http://opa:8181
+    depends_on:
+      - postgres
+      - redis
+      - auth-service
+    networks:
+      - app
+      - data
+
+  transaction-service:
+    build:
+      context: ..
+      dockerfile: docker/transaction-service.Dockerfile
+    environment:
+      SB_POSTGRES_DSN: postgresql+asyncpg://securebank:securebank-dev-only-change-me@postgres:5432/postgres
+      SB_REDIS_URL: redis://:securebank-dev-only@redis:6379/2
+      SB_KAFKA_BOOTSTRAP: kafka:9092
+      SB_VAULT_ADDR: http://vault:8200
+      SB_OPA_URL: http://opa:8181
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - auth-service
+    networks:
+      - app
+      - data
+
+  fraud-detection-service:
+    build:
+      context: ..
+      dockerfile: docker/fraud-detection-service.Dockerfile
+    environment:
+      SB_REDIS_URL: redis://:securebank-dev-only@redis:6379/3
+      SB_KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      - redis
+      - kafka
+    networks:
+      - app
+      - data
+
+  notification-service:
+    build:
+      context: ..
+      dockerfile: docker/notification-service.Dockerfile
+    environment:
+      SB_REDIS_URL: redis://:securebank-dev-only@redis:6379/4
+      SB_KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      - redis
+      - kafka
+    networks:
+      - app
+      - data
+
+  api-gateway:
+    build:
+      context: ..
+      dockerfile: docker/api-gateway.Dockerfile
+    ports:
+      - "8443:8443"
+    environment:
+      SB_KAFKA_BOOTSTRAP: kafka:9092
+      SB_VAULT_ADDR: http://vault:8200
+      SB_OPA_URL: http://opa:8181
+    depends_on:
+      - auth-service
+      - account-service
+      - transaction-service
+    networks:
+      - edge
+      - app
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api-gateway
+    networks:
+      - edge
+
+  soar-service:
+    build:
+      context: ..
+      dockerfile: docker/soar-service.Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      SB_QRADAR_WEBHOOK_SECRET: securebank-dev-webhook-secret-change-me
+      SB_REDIS_URL: redis://:securebank-dev-only@redis:6379/5
+      SB_AUTH_SERVICE_URL: http://auth-service:8001
+      SB_ACCOUNT_SERVICE_URL: http://account-service:8002
+      SB_GATEWAY_URL: http://api-gateway:8443
+      SB_DRY_RUN: "true"
+    depends_on:
+      - redis
+      - auth-service
+      - api-gateway
+    networks:
+      - app
+      - sec
+
+  ai-security-agent:
+    build:
+      context: ..
+      dockerfile: docker/ai-security-agent.Dockerfile
+    ports:
+      - "8007:8007"
+    environment:
+      SB_LLM_PROVIDER: heuristic
+    depends_on:
+      - fraud-detection-service
+    networks:
+      - app
+      - sec
+
+# ================= NETWORKS =================
+
+networks:
+  edge: {}
+  app: {}
+  data: {}
+  sec: {}
+
+# ================= VOLUMES =================
+
+volumes:
+  pg-data: {}
+  redis-data: {}
+  kafka-data: {}

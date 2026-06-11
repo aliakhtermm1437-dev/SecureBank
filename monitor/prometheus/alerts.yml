@@ -1,0 +1,47 @@
+groups:
+  - name: securebank.errors
+    rules:
+      - alert: HighHttp5xxRate
+        expr: |
+          sum by (service) (rate(sb_http_requests_total{status=~"5.."}[5m]))
+            /
+          sum by (service) (rate(sb_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: high }
+        annotations:
+          summary: ">5% 5xx on {{ $labels.service }}"
+          runbook: "https://runbooks.securebank.local/http-5xx"
+
+      - alert: AuthFailedLoginSpike
+        expr: |
+          rate(sb_http_requests_total{service="auth-service",path="/v1/auth/login",status="401"}[5m]) > 10
+        for: 3m
+        labels: { severity: high }
+        annotations:
+          summary: "Possible credential stuffing on auth-service"
+
+      - alert: RateLimitHit
+        expr: |
+          increase(sb_http_requests_total{status="429"}[5m]) > 200
+        for: 5m
+        labels: { severity: medium }
+
+      - alert: HighRiskTransferRate
+        expr: |
+          increase(sb_http_requests_total{service="transaction-service",path="/v1/transactions/transfer",status="202"}[5m]) > 100
+        for: 10m
+        labels: { severity: medium }
+        annotations:
+          summary: "Unusually high transfer volume"
+
+  - name: securebank.infra
+    rules:
+      - alert: PodRestartingTooOften
+        expr: increase(kube_pod_container_status_restarts_total{namespace=~"securebank-.*"}[15m]) > 3
+        for: 15m
+        labels: { severity: high }
+
+      - alert: VaultLeader missing
+        expr: vault_core_active{job=~".*vault.*"} == 0
+        for: 5m
+        labels: { severity: critical }

@@ -1,0 +1,44 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: securebank-edge
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    securebank.local/tier: edge
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: securebank-app
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    securebank.local/tier: app
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: securebank-data
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    securebank.local/tier: data
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: securebank-sec
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    securebank.local/tier: sec
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: securebank-obs
+  labels:
+    pod-security.kubernetes.io/enforce: baseline   # falco needs hostPID
+    securebank.local/tier: obs

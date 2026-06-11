@@ -1,0 +1,68 @@
+{
+  "title": "SecureBank — Platform Overview",
+  "uid": "sb-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["securebank"],
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Requests per second",
+      "targets": [{
+        "expr": "sum(rate(sb_http_requests_total[1m]))",
+        "refId": "A"
+      }],
+      "gridPos": {"x":0,"y":0,"w":6,"h":4}
+    },
+    {
+      "type": "stat",
+      "title": "5xx rate (last 5m)",
+      "targets": [{
+        "expr": "sum(rate(sb_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(sb_http_requests_total[5m]))",
+        "refId": "A"
+      }],
+      "gridPos": {"x":6,"y":0,"w":6,"h":4}
+    },
+    {
+      "type": "stat",
+      "title": "401 Unauthorized rate",
+      "targets": [{
+        "expr": "sum(rate(sb_http_requests_total{status=\"401\"}[5m]))",
+        "refId": "A"
+      }],
+      "gridPos": {"x":12,"y":0,"w":6,"h":4}
+    },
+    {
+      "type": "stat",
+      "title": "Active sessions (auth)",
+      "targets": [{ "expr": "sb_active_sessions{service=\"auth-service\"}", "refId":"A" }],
+      "gridPos": {"x":18,"y":0,"w":6,"h":4}
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by service",
+      "targets": [{
+        "expr": "sum by (service) (rate(sb_http_requests_total[1m]))",
+        "refId": "A"
+      }],
+      "gridPos": {"x":0,"y":4,"w":24,"h":8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p95 by service",
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le, service) (rate(sb_http_request_seconds_bucket[5m])))",
+        "refId": "A"
+      }],
+      "gridPos": {"x":0,"y":12,"w":24,"h":8}
+    },
+    {
+      "type": "logs",
+      "title": "Failed auth events",
+      "datasource": "Loki",
+      "targets": [{ "expr": "{service=\"auth-service\"} |= \"auth.login.failed\"", "refId":"A" }],
+      "gridPos": {"x":0,"y":20,"w":24,"h":8}
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+# SecureBank — Confluent Schema Registry (mTLS + RBAC)
+#
+# The brief specifies "Apache Kafka and/or Pulsar (TLS, ACLs, Schema Registry)".
+# Strimzi-managed Kafka runs in this namespace; this manifest brings up the
+# Schema Registry with mTLS to the brokers and a least-privilege ACL that
+# allows only schema CRUD on the `_schemas` topic.
+#
+# Producers (transaction-service) and consumers (fraud-detection-service,
+# notification-service) reference Avro schemas registered here.  The
+# embedded SerDe checks schema compatibility (FULL_TRANSITIVE) before
+# producing or consuming, so a rogue producer cannot publish a malformed
+# event that the consumers would otherwise have to handle defensively.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: schema-registry, namespace: securebank-data }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: schema-registry
+  namespace: securebank-data
+  labels: { strimzi.io/cluster: securebank-kafka }
+spec:
+  authentication: { type: tls }
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: _schemas, patternType: literal }
+        operations: [Read, Write, Create, Describe, DescribeConfigs]
+      - resource: { type: group, name: schema-registry, patternType: literal }
+        operations: [Read, Describe]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  namespace: securebank-data
+  labels: { app: schema-registry }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: schema-registry } }
+  template:
+    metadata:
+      labels: { app: schema-registry }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5556"
+    spec:
+      serviceAccountName: schema-registry
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: schema-registry
+          image: confluentinc/cp-schema-registry:7.7.1
+          env:
+            - { name: SCHEMA_REGISTRY_HOST_NAME, value: schema-registry }
+            - { name: SCHEMA_REGISTRY_LISTENERS, value: "https://0.0.0.0:8081" }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS,
+                value: "SSL://securebank-kafka-kafka-bootstrap:9093" }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL, value: SSL }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_LOCATION, value: /certs/truststore.jks }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_SSL_KEYSTORE_LOCATION,  value: /certs/keystore.jks }
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SSL_TRUSTSTORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: schema-registry-jks, key: truststore_pw } }
+            - name: SCHEMA_REGISTRY_KAFKASTORE_SSL_KEYSTORE_PASSWORD
+              valueFrom: { secretKeyRef: { name: schema-registry-jks, key: keystore_pw } }
+            - { name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC, value: "_schemas" }
+            - { name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL, value: "FULL_TRANSITIVE" }
+            - { name: SCHEMA_REGISTRY_AUTHENTICATION_METHOD, value: "BASIC" }
+            - { name: SCHEMA_REGISTRY_AUTHENTICATION_REALM,  value: "SchemaRegistry-Props" }
+            - { name: SCHEMA_REGISTRY_AUTHENTICATION_ROLES,  value: "developer,admin" }
+            - { name: SCHEMA_REGISTRY_SSL_CLIENT_AUTH,       value: "true" }
+            - { name: SCHEMA_REGISTRY_INTER_INSTANCE_PROTOCOL, value: "https" }
+          ports:
+            - { containerPort: 8081, name: https }
+            - { containerPort: 5556, name: jmx }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits:   { cpu: "1",  memory: 1Gi  }
+          livenessProbe:
+            httpGet: { path: /subjects, port: 8081, scheme: HTTPS }
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet: { path: /subjects, port: 8081, scheme: HTTPS }
+            initialDelaySeconds: 10
+          volumeMounts:
+            - { name: certs, mountPath: /certs, readOnly: true }
+            - { name: jaas,  mountPath: /etc/schema-registry/jaas, readOnly: true }
+            - { name: tmp,   mountPath: /tmp }
+      volumes:
+        - { name: certs, secret: { secretName: schema-registry-jks, defaultMode: 0o400 } }
+        - { name: jaas,  secret: { secretName: schema-registry-jaas, defaultMode: 0o400 } }
+        - { name: tmp,   emptyDir: { medium: Memory, sizeLimit: 64Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-registry
+  namespace: securebank-data
+spec:
+  selector: { app: schema-registry }
+  ports:
+    - { name: https, port: 8081, targetPort: 8081 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-schema-registry-from-app
+  namespace: securebank-data
+spec:
+  podSelector: { matchLabels: { app: schema-registry } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { name: securebank-app } }
+      ports:
+        - { protocol: TCP, port: 8081 }

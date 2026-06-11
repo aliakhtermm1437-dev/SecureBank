@@ -1,0 +1,79 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: soar-service, namespace: securebank-sec }
+---
+# Least-privilege Role — only what playbooks actually need.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: soar-service }
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings", "clusterrolebindings"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: soar-service }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: soar-service
+subjects:
+  - { kind: ServiceAccount, name: soar-service, namespace: securebank-sec }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: soar-service, namespace: securebank-sec, labels: { app: soar-service } }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: soar-service } }
+  template:
+    metadata:
+      labels: { app: soar-service }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8006"
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "soar-service"
+    spec:
+      serviceAccountName: soar-service
+      runtimeClassName: gvisor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: soar
+          image: ghcr.io/securebank/soar-service:1.0.0@sha256:REPLACE_AT_BUILD
+          ports: [{ containerPort: 8006 }]
+          env:
+            - name: SB_QRADAR_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: soar-secrets, key: qradar_webhook_secret } }
+            - { name: SB_DRY_RUN, value: "false" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 384Mi }
+          livenessProbe:  { httpGet: { path: /health, port: 8006 }, initialDelaySeconds: 10 }
+          readinessProbe: { httpGet: { path: /ready,  port: 8006 }, initialDelaySeconds: 5 }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes:
+        - { name: tmp, emptyDir: { medium: Memory, sizeLimit: 64Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: soar-service, namespace: securebank-sec }
+spec:
+  selector: { app: soar-service }
+  ports: [{ port: 8006, targetPort: 8006 }]

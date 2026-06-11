@@ -1,0 +1,87 @@
+# Default-deny per namespace + explicit allow-rules.
+# CIS K8s 5.3, ASVS V1.11, NIST 800-53 SC-7.
+---
+# Default deny ingress in app, data, sec.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: securebank-app }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: securebank-data }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: securebank-sec }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Allow DNS egress from all app pods (kube-dns in kube-system).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns, namespace: securebank-app }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Edge → Auth/Account/Tx
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-edge-to-app, namespace: securebank-app }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: securebank-edge } }
+      ports:
+        - { protocol: TCP, port: 8001 }
+        - { protocol: TCP, port: 8002 }
+        - { protocol: TCP, port: 8003 }
+        - { protocol: TCP, port: 8004 }
+        - { protocol: TCP, port: 8005 }
+---
+# App → Data
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-app-to-data, namespace: securebank-data }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: securebank-app } }
+      ports:
+        - { protocol: TCP, port: 5432 } # PG
+        - { protocol: TCP, port: 6379 } # Redis
+        - { protocol: TCP, port: 9092 } # Kafka
+        - { protocol: TCP, port: 9093 } # Kafka TLS
+---
+# App egress to data + sec
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-app-egress-to-data-sec, namespace: securebank-app }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: securebank-data } }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: securebank-sec } }

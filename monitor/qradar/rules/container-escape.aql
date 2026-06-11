@@ -1,0 +1,8 @@
+-- Container escape (MITRE T1611) — any Falco CRITICAL with that tag should
+-- open an offense immediately.
+SELECT *
+FROM events
+WHERE devicetype = 'Falco' AND
+      severity >= 9 AND
+      payload MATCHES '.*mitre_t1611.*'
+INTO offenses(category='Container Security', description='Container Escape Attempt', severity=10);

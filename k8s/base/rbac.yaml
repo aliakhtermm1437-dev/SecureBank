@@ -1,0 +1,54 @@
+# Per-service ServiceAccount + tightly scoped Role.
+# CIS K8s 5.1 — minimize use of cluster-admin, prefer Role over ClusterRole.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: auth-service, namespace: securebank-app }
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: account-service, namespace: securebank-app }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: transaction-service, namespace: securebank-app }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: fraud-detection-service, namespace: securebank-app }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: notification-service, namespace: securebank-app }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: api-gateway, namespace: securebank-edge }
+---
+# Read-only access to own configmaps/secrets — nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: read-own-config, namespace: securebank-app }
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: auth-read-own, namespace: securebank-app }
+subjects: [{ kind: ServiceAccount, name: auth-service, namespace: securebank-app }]
+roleRef: { kind: Role, name: read-own-config, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: account-read-own, namespace: securebank-app }
+subjects: [{ kind: ServiceAccount, name: account-service, namespace: securebank-app }]
+roleRef: { kind: Role, name: read-own-config, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: tx-read-own, namespace: securebank-app }
+subjects: [{ kind: ServiceAccount, name: transaction-service, namespace: securebank-app }]
+roleRef: { kind: Role, name: read-own-config, apiGroup: rbac.authorization.k8s.io }

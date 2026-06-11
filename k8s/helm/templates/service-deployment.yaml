@@ -1,0 +1,58 @@
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+{{- $ports := dict "authService" 8001 "accountService" 8002 "transactionService" 8003 "fraudDetectionService" 8004 "notificationService" 8005 "apiGateway" 8443 }}
+{{- $kebab := $name | kebabcase }}
+{{- $port := index $ports $name }}
+{{- $ns := ternary "securebank-edge" "securebank-app" (eq $name "apiGateway") }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $kebab }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "securebank.labels" (dict "name" $kebab) | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas | default 2 }}
+  selector:
+    matchLabels: { app: {{ $kebab }} }
+  template:
+    metadata:
+      labels: { app: {{ $kebab }} }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ $port }}"
+    spec:
+      serviceAccountName: {{ $kebab }}
+      securityContext:
+        {{- include "securebank.podSecurityContext" (dict "Values" $.Values) | nindent 8 }}
+      containers:
+        - name: {{ $kebab }}
+          image: {{ include "securebank.image" (dict "name" $kebab "Values" $.Values) }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports: [{ containerPort: {{ $port }} }]
+          env:
+            - { name: SB_ENVIRONMENT, value: "prod" }
+            - { name: SB_VAULT_ADDR, value: "{{ $.Values.global.vault.addr }}" }
+            - { name: SB_KAFKA_BOOTSTRAP, value: "{{ $.Values.global.kafka.bootstrap }}" }
+          securityContext:
+            {{- include "securebank.containerSecurityContext" (dict "Values" $.Values) | nindent 12 }}
+          {{- with $svc.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:  { httpGet: { path: /health, port: {{ $port }} }, initialDelaySeconds: 10 }
+          readinessProbe: { httpGet: { path: /ready,  port: {{ $port }} }, initialDelaySeconds: 5 }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: { medium: Memory, sizeLimit: 64Mi } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $kebab }}
+  namespace: {{ $ns }}
+spec:
+  selector: { app: {{ $kebab }} }
+  ports: [{ port: {{ $port }}, targetPort: {{ $port }} }]
+{{- end }}
+{{- end }}

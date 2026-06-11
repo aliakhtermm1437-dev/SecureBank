@@ -1,0 +1,79 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: api-gateway, namespace: securebank-edge }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: api-gateway } }
+  template:
+    metadata:
+      labels: { app: api-gateway }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8443"
+    spec:
+      serviceAccountName: api-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: gateway
+          image: ghcr.io/securebank/api-gateway:1.0.0@sha256:REPLACE_AT_BUILD
+          ports: [{ containerPort: 8443 }]
+          env:
+            - name: SB_JWKS_URL
+              value: http://auth-service.securebank-app:8001/v1/auth/.well-known/jwks.json
+            - name: SB_UPSTREAM_AUTH
+              value: http://auth-service.securebank-app:8001
+            - name: SB_UPSTREAM_ACCOUNT
+              value: http://account-service.securebank-app:8002
+            - name: SB_UPSTREAM_TX
+              value: http://transaction-service.securebank-app:8003
+            - name: SB_UPSTREAM_NOTIFICATION
+              value: http://notification-service.securebank-app:8005
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 1, memory: 512Mi }
+          livenessProbe:  { httpGet: { path: /health, port: 8443 } }
+          readinessProbe: { httpGet: { path: /health, port: 8443 } }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: { medium: Memory, sizeLimit: 64Mi } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api-gateway, namespace: securebank-edge }
+spec:
+  type: ClusterIP
+  selector: { app: api-gateway }
+  ports: [{ port: 8443, targetPort: 8443 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-gateway
+  namespace: securebank-edge
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 256k
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/server-snippet: |
+      add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+spec:
+  ingressClassName: nginx
+  tls:
+    - { hosts: [api.securebank.local], secretName: api-gateway-tls }
+  rules:
+    - host: api.securebank.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: api-gateway, port: { number: 8443 } }

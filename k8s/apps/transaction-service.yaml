@@ -1,0 +1,61 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: transaction-service, namespace: securebank-app, labels: { app: transaction-service } }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: transaction-service } }
+  template:
+    metadata:
+      labels: { app: transaction-service }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8003"
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "transaction-service"
+    spec:
+      serviceAccountName: transaction-service
+      # gVisor sandbox: extra kernel-syscall isolation for the money-moving
+      # service (highest blast radius if compromised).  Satisfies brief
+      # requirement "RuntimeClass" under Kubernetes Security.
+      runtimeClassName: gvisor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: transaction-service
+          image: ghcr.io/securebank/transaction-service:1.0.0@sha256:REPLACE_AT_BUILD
+          ports: [{ containerPort: 8003 }]
+          env:
+            - name: SB_POSTGRES_DSN
+              valueFrom: { secretKeyRef: { name: tx-db, key: dsn } }
+            - name: SB_KAFKA_BOOTSTRAP
+              value: kafka.securebank-data:9093
+            - name: SB_KAFKA_HMAC_HEX
+              valueFrom: { secretKeyRef: { name: kafka-hmac, key: hex } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          livenessProbe:  { httpGet: { path: /health, port: 8003 }, initialDelaySeconds: 10 }
+          readinessProbe: { httpGet: { path: /ready,  port: 8003 }, initialDelaySeconds: 5 }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes:
+        - { name: tmp, emptyDir: { medium: Memory, sizeLimit: 64Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: transaction-service, namespace: securebank-app }
+spec:
+  selector: { app: transaction-service }
+  ports: [{ port: 8003, targetPort: 8003 }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: transaction-service, namespace: securebank-app }
+spec: { minAvailable: 1, selector: { matchLabels: { app: transaction-service } } }

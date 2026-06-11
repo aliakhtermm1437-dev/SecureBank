@@ -1,0 +1,30 @@
+grafana:
+  adminPassword: changeMeInVault
+  defaultDashboardsTimezone: Asia/Karachi
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: securebank
+          orgId: 1
+          folder: SecureBank
+          type: file
+          disableDeletion: true
+          options: { path: /var/lib/grafana/dashboards/securebank }
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    additionalScrapeConfigs:
+      - job_name: 'securebank-pods'
+        kubernetes_sd_configs: [{ role: pod }]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: (.+)
+            replacement: $1

@@ -1,0 +1,22 @@
+# Trivy CI policy — fail the build on HIGH or CRITICAL vulnerabilities,
+# or on a HIGH/CRITICAL secret finding. Used by ci/.github/workflows/sec-scan.yml.
+severity: HIGH,CRITICAL
+ignore-unfixed: true
+exit-code: 1
+vuln-type:
+  - os
+  - library
+security-checks:
+  - vuln
+  - config
+  - secret
+scanners:
+  - vuln
+  - misconfig
+  - secret
+  - license
+license:
+  forbidden:
+    - GPL-3.0
+    - AGPL-3.0
+    - SSPL-1.0

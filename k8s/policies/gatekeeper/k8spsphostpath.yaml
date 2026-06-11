@@ -1,0 +1,26 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata: { name: k8spsphostfilesystem }
+spec:
+  crd:
+    spec:
+      names: { kind: K8sPSPHostFilesystem }
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8spsphostfilesystem
+        violation[{"msg": msg}] {
+          input.review.kind.kind == "Pod"
+          some i
+          v := input.review.object.spec.volumes[i]
+          v.hostPath
+          msg := sprintf("hostPath volume %q not allowed (volume index %d)", [v.name, i])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sPSPHostFilesystem
+metadata: { name: psp-host-filesystem }
+spec:
+  match:
+    kinds: [{ apiGroups: [""], kinds: [Pod] }]
+    excludedNamespaces: [kube-system, gatekeeper-system, falco]

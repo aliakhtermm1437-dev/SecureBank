@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: securebank-dev
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'securebank-services'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'auth-service:8001'
+          - 'account-service:8002'
+          - 'transaction-service:8003'
+          - 'fraud-detection-service:8004'
+          - 'notification-service:8005'
+          - 'api-gateway:8443'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']

@@ -1,0 +1,18 @@
+rules_file:
+  - /etc/falco/falco_rules.yaml
+  - /etc/falco/rules.d
+json_output: true
+json_include_output_property: true
+log_stderr: true
+log_level: info
+
+stdout_output:
+  enabled: true
+
+http_output:
+  enabled: false       # set true to forward to QRadar HTTP receiver
+
+program_output:
+  enabled: true
+  program: |
+    bash -c 'while read line; do echo "$line" >> /var/log/falco/events.json; done'

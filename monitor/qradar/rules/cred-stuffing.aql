@@ -1,0 +1,17 @@
+-- IBM QRadar AQL — Credential Stuffing detection
+-- Tactic: TA0006 / Technique: T1110.004
+-- Fires offense if a single source IP causes >30 401s on /v1/auth/login within 5 minutes.
+
+SELECT
+    sourceip                                                       AS attacker_ip,
+    COUNT(*)                                                       AS failed_attempts,
+    UNIQUECOUNT(username)                                          AS unique_users_tried,
+    MIN(starttime)                                                 AS first_seen,
+    MAX(starttime)                                                 AS last_seen
+FROM events
+WHERE
+    devicetype = 'SecureBank Platform' AND
+    payload MATCHES '.*event":"auth.login.failed".*'
+GROUP BY sourceip
+HAVING COUNT(*) > 30
+INTO offenses(category='Authentication', description='Credential Stuffing', severity=8);

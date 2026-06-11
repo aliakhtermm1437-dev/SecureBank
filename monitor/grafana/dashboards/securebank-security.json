@@ -1,0 +1,36 @@
+{
+  "title": "SecureBank — Security & Detection",
+  "uid": "sb-security",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["securebank","security"],
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "type": "stat", "title": "WAF blocks (5m)",
+      "targets": [{"expr": "increase(sb_http_requests_total{service=\"api-gateway\",status=\"400\"}[5m])"}],
+      "gridPos": {"x":0,"y":0,"w":6,"h":4}
+    },
+    {
+      "type": "stat", "title": "Rate-limit triggers (5m)",
+      "targets": [{"expr": "increase(sb_http_requests_total{status=\"429\"}[5m])"}],
+      "gridPos": {"x":6,"y":0,"w":6,"h":4}
+    },
+    {
+      "type": "stat", "title": "Fraud alerts (1h)",
+      "datasource": "Loki",
+      "targets": [{"expr": "sum(count_over_time({service=\"fraud-detection-service\"} |= \"fraud.alert\" [1h]))"}],
+      "gridPos": {"x":12,"y":0,"w":6,"h":4}
+    },
+    {
+      "type": "logs", "title": "Falco events", "datasource": "Loki",
+      "targets": [{"expr": "{container=~\"falco.*\"} | json"}],
+      "gridPos": {"x":0,"y":4,"w":24,"h":10}
+    },
+    {
+      "type": "logs", "title": "Audit events (security-relevant)", "datasource": "Loki",
+      "targets": [{"expr": "{service=~\"auth-service|account-service|transaction-service\"} |= \"audit\" | json"}],
+      "gridPos": {"x":0,"y":14,"w":24,"h":12}
+    }
+  ]
+}

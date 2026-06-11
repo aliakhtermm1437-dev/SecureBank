@@ -1,0 +1,27 @@
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata: { name: securebank-app-quota, namespace: securebank-app }
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "30"
+---
+apiVersion: v1
+kind: LimitRange
+metadata: { name: securebank-app-limits, namespace: securebank-app }
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 200m
+        memory: 256Mi
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      max:
+        cpu: "2"
+        memory: 2Gi

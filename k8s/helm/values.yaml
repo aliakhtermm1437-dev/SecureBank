@@ -1,0 +1,60 @@
+global:
+  imageRegistry: ghcr.io/securebank
+  imageTag: "1.0.0"
+  imagePullPolicy: IfNotPresent
+  jwt:
+    issuer: https://auth.securebank.local
+    audience: https://api.securebank.local
+  kafka:
+    bootstrap: kafka.securebank-data:9093
+  vault:
+    addr: http://vault.securebank-sec:8200
+
+services:
+  authService:
+    enabled: true
+    replicas: 2
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+  accountService:
+    enabled: true
+    replicas: 2
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: 500m, memory: 512Mi }
+  transactionService:
+    enabled: true
+    replicas: 2
+  fraudDetectionService:
+    enabled: true
+    replicas: 2
+    resources:
+      requests: { cpu: 200m, memory: 256Mi }
+      limits:   { cpu: 1, memory: 1Gi }
+  notificationService:
+    enabled: true
+    replicas: 2
+  apiGateway:
+    enabled: true
+    replicas: 3
+    ingress:
+      enabled: true
+      host: api.securebank.local
+      className: nginx
+      tlsSecret: api-gateway-tls
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+  seccompProfile: { type: RuntimeDefault }
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+observability:
+  prometheus: { enabled: true }
+  loki:       { enabled: true }
+  grafana:    { enabled: true }
+  falco:      { enabled: true }

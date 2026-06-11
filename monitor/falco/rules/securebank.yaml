@@ -1,0 +1,133 @@
+- list: securebank_app_images
+  items:
+    - "ghcr.io/securebank/auth-service"
+    - "ghcr.io/securebank/account-service"
+    - "ghcr.io/securebank/transaction-service"
+    - "ghcr.io/securebank/fraud-detection-service"
+    - "ghcr.io/securebank/notification-service"
+    - "ghcr.io/securebank/api-gateway"
+
+- macro: securebank_container
+  condition: container.image.repository in (securebank_app_images)
+
+# ---- T1611 — Escape to Host (CVE-2022-0185 et al.) ----
+- rule: Container escape attempt
+  desc: Detect attempts to access /proc/1, /host or run nsenter from inside a container
+  condition: >
+    securebank_container and
+    (proc.name in (nsenter, mount, unshare) or
+     (open_read and fd.name startswith "/proc/1/") or
+     (open_read and fd.name startswith "/host/"))
+  output: >
+    Possible container escape attempt
+    (user=%user.name proc=%proc.cmdline file=%fd.name container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [mitre_t1611, container, escape]
+
+# ---- T1059 — Command/Scripting interpreter spawned ----
+- rule: Shell spawned in app container
+  desc: Distroless images should never spawn a shell
+  condition: >
+    spawned_process and securebank_container and proc.name in (sh, bash, dash, zsh, ksh)
+  output: >
+    Shell spawned in app container
+    (proc=%proc.cmdline parent=%proc.pname container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [mitre_t1059, shell]
+
+# ---- T1552.001 — Credentials in files ----
+- rule: Read sensitive credential files
+  desc: Read of /etc/shadow, /var/run/secrets/kubernetes.io/serviceaccount/token outside expected processes
+  condition: >
+    open_read and securebank_container and
+    (fd.name in (/etc/shadow, /etc/gshadow) or
+     fd.name pmatch "/var/run/secrets/kubernetes.io/serviceaccount/*")
+    and not proc.name in (python, python3, uvicorn)
+  output: >
+    Sensitive credential file read
+    (proc=%proc.cmdline file=%fd.name container=%container.name image=%container.image.repository)
+  priority: WARNING
+  tags: [mitre_t1552, credentials]
+
+# ---- T1071.001 — Suspicious outbound HTTP ----
+- rule: Outbound traffic to non-allowed IP
+  desc: App connects outbound to address not in allow-list
+  condition: >
+    outbound and securebank_container and
+    not fd.sip in (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and
+    not fd.sport in (53, 443)
+  output: >
+    Unusual outbound connection
+    (dst=%fd.sip:%fd.sport proc=%proc.cmdline container=%container.name)
+  priority: NOTICE
+  tags: [mitre_t1071, c2]
+
+# ---- T1496 — Cryptomining-like CPU surge ----
+- rule: Cryptomining process pattern
+  desc: Suspicious cryptominer binary name observed
+  condition: >
+    spawned_process and securebank_container and
+    proc.name in (xmrig, minerd, ethminer, cpuminer, kdevtmpfsi)
+  output: >
+    Possible cryptominer (proc=%proc.cmdline container=%container.name)
+  priority: CRITICAL
+  tags: [mitre_t1496, cryptomining]
+
+# ---- T1485 — Data destruction ----
+- rule: Mass file deletion in app container
+  desc: rm -rf of large directory
+  condition: >
+    spawned_process and securebank_container and
+    proc.cmdline matches "(rm.*-r.*-f|rm.*-rf).*"
+  output: >
+    Suspicious mass delete (cmd=%proc.cmdline container=%container.name)
+  priority: CRITICAL
+  tags: [mitre_t1485, destruction]
+
+# ---- T1610 — Deploy container in cluster ----
+- rule: kubectl from inside container
+  desc: kubectl run from a pod is suspicious unless it's the deployer
+  condition: >
+    spawned_process and securebank_container and proc.name = "kubectl"
+  output: >
+    kubectl invoked inside app pod (proc=%proc.cmdline container=%container.name)
+  priority: WARNING
+  tags: [mitre_t1610]
+
+# ---- CWE-121 / CWE-416 / CWE-134 — Memory corruption ----
+- rule: Memory corruption in banking workload
+  desc: >
+    Process in a securebank container crashed via SIGSEGV/SIGABRT or stack-canary
+    abort. This pattern matches the Red/Blue memory-safety drill.
+  condition: >
+    proc_exit and securebank_container and
+    (proc.exit_code = 139 or proc.exit_code = 134 or proc.exit_code = 11 or proc.exit_code = 6)
+  output: >
+    Possible memory corruption — process died with %proc.exit_code
+    (proc=%proc.name container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [cwe_121, cwe_416, cwe_134, memory_safety]
+
+# ---- T1574 / image-tag policy bypass ----
+- rule: Disallowed vulnerable demo image pulled
+  desc: Pulling the intentionally-vulnerable memory-safety image outside the drill namespace
+  condition: >
+    container.image.repository contains "vuln" and not k8s.ns.name = "securebank-drill"
+  output: >
+    Vulnerable demo image running outside drill namespace
+    (image=%container.image.repository ns=%k8s.ns.name pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [policy, supply_chain]
+
+# ---- T1078 / T1110 — JWT replay / impossible travel proxy detector ----
+- rule: Read of JWKS or auth key material by non-auth process
+  desc: Any container that is not auth-service trying to read the JWKS/private key
+  condition: >
+    open_read and securebank_container and
+    (fd.name pmatch "/var/run/securebank/keys/*") and
+    not container.image.repository = "ghcr.io/securebank/auth-service"
+  output: >
+    Non-auth container attempted JWKS/key read
+    (proc=%proc.cmdline file=%fd.name container=%container.name)
+  priority: CRITICAL
+  tags: [mitre_t1078, jwt, credentials]

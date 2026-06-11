@@ -1,0 +1,60 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: ai-security-agent, namespace: securebank-sec }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-security-agent
+  namespace: securebank-sec
+  labels: { app: ai-security-agent }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: ai-security-agent } }
+  template:
+    metadata:
+      labels: { app: ai-security-agent }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8007"
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "ai-security-agent"
+    spec:
+      serviceAccountName: ai-security-agent
+      runtimeClassName: gvisor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: ai-agent
+          image: ghcr.io/securebank/ai-security-agent:1.0.0@sha256:REPLACE_AT_BUILD
+          ports: [{ containerPort: 8007 }]
+          env:
+            - { name: SB_LLM_PROVIDER, value: "heuristic" }
+            - name: SB_LLM_API_KEY
+              valueFrom: { secretKeyRef: { name: ai-agent-secrets, key: llm_api_key, optional: true } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 768Mi }
+          livenessProbe:  { httpGet: { path: /health, port: 8007 }, initialDelaySeconds: 10 }
+          readinessProbe: { httpGet: { path: /ready,  port: 8007 }, initialDelaySeconds: 5 }
+          volumeMounts:
+            - { name: tmp,    mountPath: /tmp }
+            - { name: models, mountPath: /var/lib/securebank/models, readOnly: true }
+      volumes:
+        - { name: tmp,    emptyDir: { medium: Memory, sizeLimit: 64Mi } }
+        - { name: models, configMap:  { name: fraud-model-bundle, optional: true } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: ai-security-agent, namespace: securebank-sec }
+spec:
+  selector: { app: ai-security-agent }
+  ports: [{ port: 8007, targetPort: 8007 }]

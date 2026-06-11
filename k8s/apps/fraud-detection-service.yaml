@@ -1,0 +1,84 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: fraud-detection-service, namespace: securebank-app }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: fraud-detection-service } }
+  template:
+    metadata:
+      labels: { app: fraud-detection-service }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8004"
+    spec:
+      serviceAccountName: fraud-detection-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: fraud
+          image: ghcr.io/securebank/fraud-detection-service:1.0.0@sha256:REPLACE_AT_BUILD
+          ports: [{ containerPort: 8004 }]
+          env:
+            - name: SB_KAFKA_BOOTSTRAP
+              value: kafka.securebank-data:9093
+            - name: SB_KAFKA_HMAC_HEX
+              valueFrom: { secretKeyRef: { name: kafka-hmac, key: hex } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits:   { cpu: 1, memory: 1Gi }
+          livenessProbe:  { httpGet: { path: /health, port: 8004 }, initialDelaySeconds: 15 }
+          readinessProbe: { httpGet: { path: /ready,  port: 8004 }, initialDelaySeconds: 5 }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: model, mountPath: /var/lib/securebank }
+      volumes:
+        - { name: tmp, emptyDir: { medium: Memory, sizeLimit: 64Mi } }
+        - { name: model, emptyDir: { sizeLimit: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: fraud-detection-service, namespace: securebank-app }
+spec:
+  selector: { app: fraud-detection-service }
+  ports: [{ port: 8004, targetPort: 8004 }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: fraud-retrain, namespace: securebank-app }
+spec:
+  schedule: "0 3 * * *"   # nightly 03:00
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: fraud-detection-service
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: retrain
+              image: ghcr.io/securebank/fraud-detection-service:1.0.0@sha256:REPLACE_AT_BUILD
+              command: ["python", "-m", "app.train", "--input", "/data/labels.csv",
+                        "--output", "/models/fraud_iforest.joblib"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              volumeMounts:
+                - { name: data,   mountPath: /data,   readOnly: true }
+                - { name: models, mountPath: /models }
+          volumes:
+            - { name: data,   persistentVolumeClaim: { claimName: fraud-labels } }
+            - { name: models, persistentVolumeClaim: { claimName: fraud-models } }

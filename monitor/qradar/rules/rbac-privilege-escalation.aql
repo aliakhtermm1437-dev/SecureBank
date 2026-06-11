@@ -1,0 +1,31 @@
+-- SecureBank QRadar — K8s RBAC privilege escalation
+-- Maps to: MITRE T1098.001 (Account Manipulation: Additional Cloud Credentials)
+--          MITRE T1078.004 (Cloud Accounts) + ATT&CK for Containers
+-- Trigger: any "create" or "patch" on (RoleBinding, ClusterRoleBinding) that
+--          binds a service account to a cluster-admin-equivalent role.
+
+SELECT
+    "k8s.user"                  AS actor,
+    "k8s.verb"                  AS verb,
+    "k8s.resource"              AS resource,
+    "k8s.subresource"           AS subresource,
+    "k8s.objectref.name"        AS binding_name,
+    "k8s.objectref.namespace"   AS namespace,
+    "k8s.requestobject.roleref.name" AS role_ref,
+    "k8s.requestobject.subjects"     AS subjects,
+    COUNT(*)                    AS count
+FROM events
+WHERE LOGSOURCETYPENAME(devicetype) = 'Kubernetes-Audit'
+  AND "k8s.verb" IN ('create','update','patch')
+  AND "k8s.resource" IN ('rolebindings','clusterrolebindings')
+  AND ( "k8s.requestobject.roleref.name" IN ('cluster-admin','admin','edit')
+        OR "k8s.requestobject.roleref.name" ILIKE '%admin%' )
+  AND "k8s.user" NOT IN ('system:serviceaccount:kube-system:deployment-controller',
+                          'system:serviceaccount:flux-system:source-controller')
+GROUP BY actor, verb, resource, subresource, binding_name, namespace, role_ref, subjects
+LAST 30 MINUTES;
+
+-- SOAR playbook PB-005:
+-- 1. Immediately patch the RoleBinding back to a least-priv role
+-- 2. Revoke the SA token (kubectl delete secret <token>)
+-- 3. Open Sev-1 offense; force MFA re-auth for `actor`

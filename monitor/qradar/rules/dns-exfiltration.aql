@@ -1,0 +1,35 @@
+-- SecureBank QRadar — DNS-based exfiltration detector
+-- Maps to: MITRE T1048.003 (Exfiltration over DNS)
+-- Trigger: high-entropy or oversized DNS subdomain seen from any app pod
+-- Source:  CoreDNS query log → promtail → Loki → QRadar forwarder
+--
+-- Heuristic:
+--   * subdomain label length ≥ 30 chars  (typical for hex/base32 payloads)
+--   * OR Shannon entropy of label ≥ 4.0 (high randomness)
+--   * AND queried zone NOT in allow-list
+--
+-- Forwarder enriches each event with the precomputed `entropy` numeric field.
+
+SELECT
+    sourceip            AS pod_ip,
+    "k8s.pod.name"      AS pod,
+    "k8s.ns.name"       AS namespace,
+    "dns.query"         AS query,
+    "dns.label"         AS suspicious_label,
+    "dns.label_len"     AS label_len,
+    "dns.entropy"       AS entropy,
+    COUNT(*)            AS query_count
+FROM events
+WHERE LOGSOURCETYPENAME(devicetype) IN ('CoreDNS', 'SecureBank-DNS')
+  AND "k8s.ns.name" ILIKE 'securebank-%'
+  AND ( "dns.label_len" >= 30 OR "dns.entropy" >= 4.0 )
+  AND "dns.zone" NOT IN ('securebank.local', 'cluster.local', 'svc.cluster.local',
+                          'pkg.securebank.local', 'api.cloudflare.com')
+GROUP BY pod_ip, pod, namespace, query, suspicious_label, label_len, entropy
+HAVING query_count >= 5
+LAST 5 MINUTES;
+
+-- SOAR playbook: PB-008 (egress-quarantine).
+-- 1. Apply NetworkPolicy `deny-egress-emergency` to the offending namespace
+-- 2. Capture pcap from the node for 30 seconds
+-- 3. Page the on-call SOC analyst

@@ -1,0 +1,40 @@
+# SecureBank — RuntimeClass definitions
+#
+# The brief calls out "RuntimeClass" as a required K8s security control.
+# We register two extra runtimes alongside the default `runc`:
+#
+#   * gvisor — userspace kernel; used by money-moving services
+#              (transaction-service, fraud-detection-service) for an extra
+#              isolation boundary against container escapes (T1611).
+#   * kata   — VM-based runtime; available for the auth-service in HSM-
+#              backed deployments where the JWT signing key lives in the
+#              sandboxed VM memory only.
+#
+# `handler` names must match the runtimes installed on each node.
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+  labels:
+    securebank.io/isolation: userspace-kernel
+handler: runsc
+scheduling:
+  nodeSelector:
+    securebank.io/runtime-gvisor: "true"
+  tolerations:
+    - key: securebank.io/runtime
+      operator: Equal
+      value: gvisor
+      effect: NoSchedule
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata
+  labels:
+    securebank.io/isolation: vm
+handler: kata-qemu
+scheduling:
+  nodeSelector:
+    securebank.io/runtime-kata: "true"

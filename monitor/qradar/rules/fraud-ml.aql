@@ -1,0 +1,8 @@
+-- High-confidence ML fraud alerts > 100k PKR — escalate to fraud ops.
+SELECT *
+FROM events
+WHERE devicetype = 'SecureBank Platform' AND
+      payload MATCHES '.*event":"fraud.alert".*' AND
+      DOUBLE(extractRegex(payload, 'score":\s*([\d.]+)')) >= 0.85 AND
+      DOUBLE(extractRegex(payload, 'amount":\s*"([\d.]+)"')) >= 100000
+INTO offenses(category='Fraud', description='High-confidence ML fraud', severity=9);
